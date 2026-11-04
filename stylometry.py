@@ -34,6 +34,9 @@ import re
 import statistics
 
 
+TTR_WINDOW = 100
+
+
 def sentences(text: str) -> list[str]:
     """Split into sentences. Rough and good enough — given to you."""
     parts = re.split(r"(?<=[.!?])\s+", text.strip())
@@ -64,8 +67,16 @@ def sentence_length_spread(text: str) -> float:
     `stdev` raises on fewer than two values. Decide what that should return
     before the attack set decides for you.
     """
-    # TODO: replace this
-    return 0.0
+    # Coefficient of variation: stdev / mean of words per sentence. 0 = every
+    # sentence the same length (AI-ish); ~1 = very lumpy (human-ish).
+    # Fewer than two sentences has no spread to measure, so it returns 0.0
+    # and style_signal treats that as "no evidence", not as "AI".
+    lengths = [len(words(s)) for s in sentences(text)]
+    lengths = [n for n in lengths if n > 0]
+    if len(lengths) < 2:
+        return 0.0
+    mean = statistics.mean(lengths)
+    return statistics.stdev(lengths) / mean if mean else 0.0
 
 
 def type_token_ratio(text: str) -> float:
@@ -80,8 +91,10 @@ def type_token_ratio(text: str) -> float:
     directly comparable on it, and if your test inputs vary a lot in length,
     that alone can look like a signal.
     """
-    # TODO: replace this
-    return 0.0
+    # Only the first TTR_WINDOW words count, so a long text isn't marked down
+    # just for being long.
+    ws = words(text)[:TTR_WINDOW]
+    return len(set(ws)) / len(ws) if ws else 0.0
 
 
 def punctuation_density(text: str) -> float:
@@ -94,8 +107,12 @@ def punctuation_density(text: str) -> float:
         more interesting than full stops, because they vary more between
         writers.
     """
-    # TODO: replace this
-    return 0.0
+    # Marks per word, counting only the "interesting" ones: ; : — – ( ) ! ? " …
+    # Full stops and commas are left out — every writer uses those.
+    ws = words(text)
+    if not ws:
+        return 0.0
+    return len(re.findall(r"[;:—–()!?\"…]", text)) / len(ws)
 
 
 # ── Combining them ───────────────────────────────────────────────────────────
@@ -122,8 +139,22 @@ def style_signal(text: str) -> float:
     you trust it. Plain and ordinary, not formal: formal prose reads as *human*
     to signal one, and it is plain writing that gets accused.
     """
-    # TODO: replace this
-    return 0.5
+    # Each measure is mapped onto 0–1 AI-ness by a straight line between two
+    # anchors (value that reads fully AI, value that reads fully human), then
+    # clamped. Anchors were set from the calibration texts — see README.
+    parts = []
+    if len(sentences(text)) >= 2:
+        parts.append(_to_ai_scale(sentence_length_spread(text), ai=0.15, human=0.70))
+    if len(words(text)) >= 10:
+        parts.append(_to_ai_scale(type_token_ratio(text), ai=0.60, human=0.90))
+    parts.append(_to_ai_scale(punctuation_density(text), ai=0.00, human=0.12))
+    return round(sum(parts) / len(parts), 4)
+
+
+def _to_ai_scale(value: float, ai: float, human: float) -> float:
+    """0.0 at the human anchor, 1.0 at the AI anchor, clamped in between."""
+    t = (value - human) / (ai - human)
+    return min(max(t, 0.0), 1.0)
 
 
 if __name__ == "__main__":

@@ -54,8 +54,12 @@ DETECTOR_MAX_TOKENS = 400
 # down BEFORE you code it, and to put the numbers in your README. Whatever you
 # decide, it goes here.
 
-WEIGHT_MODEL_SIGNAL = 0.5
-WEIGHT_STYLE_SIGNAL = 0.5
+# Model signal counts more: it separates the calibration texts better than the
+# style signal does. If the two disagree by more than DISAGREEMENT_GAP, the
+# combined score can't reach the AI label (see scoring.combine_signals).
+WEIGHT_MODEL_SIGNAL = 0.6
+WEIGHT_STYLE_SIGNAL = 0.4
+DISAGREEMENT_GAP = 0.3
 
 
 # ─── Thresholds (Milestone 5) ────────────────────────────────────────────────
