@@ -1,0 +1,2 @@
+{"timestamp": "2026-11-04T15:20:47+00:00", "content_id": "08910508-6d12-4484-bc7e-0fe421d15054", "creator_id": "dinesh", "guess": "human", "model_score": 0.447, "style_score": null, "combined_score": null, "label": null, "status": "decided"}
+{"timestamp": "2026-11-04T15:20:47+00:00", "creator_id": "dinesh", "event": "rejected", "status": "rejected", "reason": "missing_or_empty_text"}

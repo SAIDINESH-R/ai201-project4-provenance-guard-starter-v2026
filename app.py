@@ -30,8 +30,13 @@ from flask import Flask, jsonify, request
 
 import audit
 import config
+import detector
 
 app = Flask(__name__)
+
+# About 3,000 words. Longer than any real submission; the detector only reads
+# the first DETECTOR_MAX_TOKENS anyway.
+MAX_TEXT_CHARS = 20_000
 
 
 # ── Rate limiting — UNIT 8 ────────────────────────────────────────────────────
@@ -200,16 +205,40 @@ def submit():
     a malformed input is one of the most common real failures there is.
     """
     payload = request.get_json(silent=True) or {}
+    text = payload.get("text")
+    creator_id = payload.get("creator_id") or "anonymous"
 
-    # TODO: delete this and build the route.
+    # Bad input is rejected and logged, never crashed on.
+    if not isinstance(text, str) or not text.strip():
+        audit.log_rejection(creator_id=creator_id, reason="missing_or_empty_text")
+        return jsonify({"error": "bad_input", "message": "Send non-empty 'text'."}), 400
+    if len(text) > MAX_TEXT_CHARS:
+        audit.log_rejection(creator_id=creator_id, reason="text_too_long", length=len(text))
+        return jsonify({
+            "error": "too_long",
+            "message": f"Text is over {MAX_TEXT_CHARS} characters.",
+        }), 413
+
+    content_id = str(uuid.uuid4())
+    model_score = detector.model_signal(text)
+    guess = "ai" if model_score >= 0.5 else "human"
+
+    # Milestone 3: one signal. confidence, label and style_score are placeholders
+    # until Milestones 4 and 5.
+    audit.log_decision(
+        content_id=content_id,
+        creator_id=creator_id,
+        guess=guess,
+        model_score=model_score,
+    )
     return jsonify({
-        "error": "not_implemented",
-        "message": "POST /submit isn't built yet — see the TODO in app.py.",
-        "you_sent": {
-            "text_length": len(payload.get("text", "")),
-            "creator_id": payload.get("creator_id"),
-        },
-    }), 501
+        "content_id": content_id,
+        "guess": guess,
+        "confidence": None,
+        "label": "pending",
+        "model_score": model_score,
+        "style_score": None,
+    })
 
 
 @app.post("/appeal")
