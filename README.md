@@ -39,6 +39,20 @@
 <!-- The path a submission takes, from arriving to the label a reader sees.
      Six or seven steps — this is the trace you wrote in Milestone 1. -->
 
+1. **Arrives.** A writer sends `POST /submit` with `text` and `creator_id` as JSON.
+2. **Checked.** `app.py` rejects missing, empty, whitespace-only, or over-20,000-character
+   text with a 400/413, and logs the rejection. Nothing reaches the signals.
+3. **Signal one.** `detector.model_signal` runs GPT-2 locally and turns how
+   predictable the text is into a 0–1 score (higher = more likely AI).
+4. **Signal two.** `stylometry.style_signal` measures the text's shape —
+   sentence-length spread, vocabulary variety, punctuation — into a 0–1 score.
+5. **Combined.** `scoring.combine_signals` weights them 60/40 and caps the result
+   below the AI threshold when the two disagree.
+6. **Labelled and logged.** `scoring.score_to_label` turns the score into one of
+   three sentences, and `audit.log_decision` writes all three scores, the label
+   and a `content_id` to `logs/audit.jsonl`. The writer gets the label and the id.
+7. **Appealed.** If the writer disagrees, `POST /appeal` with that `content_id`
+   adds an appeal entry and moves the item to `under_review`.
 
 
 ---
@@ -53,28 +67,52 @@
 
 ### Signal one — the model signal
 
-**What it measures:**
+**What it measures:** How predictable the text is to GPT-2 (its perplexity),
+mapped onto 0–1. Low perplexity = high score = more likely AI.
 
-**Why that might differ between human and AI writing:**
+**Why that might differ between human and AI writing:** A language model writes
+by picking likely next words, so its output is easy for another model to
+predict. People make odder word choices.
 
-**What it can't see:**
+**What it can't see:** Who wrote it. It only sees how ordinary the words are.
+Plain human writing is predictable too — my meeting note ("The meeting is moved
+to Thursday at 3pm…") scored 0.82. And AI writing prompted to be creative is
+unpredictable — an AI poem I asked for scored 0.15.
 
 ### Signal two — the style signal
 
-**What it measures:**
+**What it measures:** Three things about the text's shape, each mapped to 0–1
+AI-ness and averaged:
+- *sentence-length spread* — stdev ÷ mean of words per sentence (skipped for
+  one-sentence text);
+- *type-token ratio* — unique words ÷ words, over the first 100 words;
+- *punctuation density* — `; : — ( ) ! ? "` per word (full stops and commas
+  ignored).
 
-**Why that might differ between human and AI writing:**
+**Why that might differ between human and AI writing:** Generated prose tends
+toward even, mid-length sentences, safe vocabulary and plain punctuation. Human
+writing is lumpier: a three-word sentence next to a long one, dashes,
+exclamations.
 
-**What it can't see:**
+**What it can't see:** Meaning. Anything that changes the shape without changing
+the substance moves it: splitting sentences, adding a dash or an exclamation
+mark, pasting in a quote. It is also weak on short text — type-token ratio sat
+between 0.82 and 1.00 for every calibration text, so it barely discriminates.
 
 ### The combining rule
 
 <!-- Write the rule in words, then give the numbers. What happens when the two
      signals disagree? -->
 
-**The rule:**
+**The rule:** A weighted average of the two signals, leaning on the model
+signal because it separated my test texts better. One protection for writers:
+if the two signals disagree by more than 0.3, the combined score is capped just
+under the AI threshold. Two methods disagreeing is uncertainty, and
+uncertainty should show as "unsure", never as an accusation.
 
-**The numbers:**
+**The numbers:** model weight 0.6, style weight 0.4, disagreement gap 0.3, cap
+at 0.64 (AI threshold 0.65 − 0.01). Thresholds: below 0.35 human, above 0.65 AI.
+All in `config.py`.
 
 **Where it lives:** `scoring.py::combine_signals`
 
@@ -83,6 +121,10 @@
 
 **A case where my two signals split, and what my rule does with it:**
 
+My plain meeting note (human-written): model 0.78–0.82, style 0.47–0.49. The
+weighted average alone is about 0.66 — high-confidence AI, a false accusation.
+The gap is over 0.3, so the cap holds it at 0.64 and the writer sees "unsure"
+instead.
 
 
 ---
@@ -96,15 +138,19 @@
 
 | Label | Score range | The exact text a reader sees |
 |---|---|---|
-| high-confidence human |  |  |
-| unsure |  |  |
-| high-confidence AI |  |  |
+| high-confidence human | 0.00 – 0.35 | We think this was probably written by a person. |
+| unsure | 0.35 – 0.65 | We can't tell who wrote this, and that's not an accusation. Plenty of writing by people lands here. Nothing changes on your work. |
+| high-confidence AI | 0.65 – 1.00 | This reads a lot like AI-generated writing. Our check can be wrong, so if you wrote this yourself, you can ask a person to review it. |
 
 **Why I worded the "unsure" one this way:**
 <!-- It's the hardest of the three. It has to admit uncertainty without
      sounding like an accusation, because the person reading it may well have
      written every word themselves. -->
 
+It says "we can't tell" first, then says straight away that it isn't an
+accusation and that nothing happens to the work. Plain human writing lands in
+this band often (my meeting note did), so the person reading it most likely did
+write it, and the label shouldn't make them feel suspected.
 
 
 ---
@@ -124,11 +170,18 @@
 ```bash
 $ curl -X POST http://127.0.0.1:5000/submit \
   -H "Content-Type: application/json" \
-  -d '{"text": "...", "creator_id": "..."}'
+  -d '{"text": "Artificial intelligence is transforming the way we live and work. It offers many benefits, such as improved efficiency and better decision-making. However, it also presents important challenges that society must address. By working together, we can ensure that AI is used responsibly and for the benefit of everyone.", "creator_id": "dinesh"}'
 ```
 
 ```json
-
+{
+  "confidence": 0.8049,
+  "content_id": "8ff1b210-e4aa-46af-967c-f28a1074549a",
+  "guess": "ai",
+  "label": "This reads a lot like AI-generated writing. Our check can be wrong, so if you wrote this yourself, you can ask a person to review it.",
+  "model_score": 0.9137,
+  "style_score": 0.6417
+}
 ```
 
 **An appeal**
@@ -136,21 +189,48 @@ $ curl -X POST http://127.0.0.1:5000/submit \
 ```bash
 $ curl -X POST http://127.0.0.1:5000/appeal \
   -H "Content-Type: application/json" \
-  -d '{"content_id": "...", "reasoning": "..."}'
+  -d '{"content_id": "8ff1b210-e4aa-46af-967c-f28a1074549a", "reasoning": "I wrote this paragraph myself for a class assignment."}'
 ```
 
 ```json
-
+{
+  "content_id": "8ff1b210-e4aa-46af-967c-f28a1074549a",
+  "message": "Thanks \u2014 your appeal is recorded and a person will review it.",
+  "status": "under_review"
+}
 ```
 
 **What the log shows afterwards**
 
 ```bash
-$ curl "http://127.0.0.1:5000/log?limit=3"
+$ curl "http://127.0.0.1:5000/log?limit=2"
 ```
 
 ```json
-
+{
+  "count": 2,
+  "entries": [
+    {
+      "combined_score": 0.8049,
+      "content_id": "8ff1b210-e4aa-46af-967c-f28a1074549a",
+      "creator_id": "dinesh",
+      "guess": "ai",
+      "label": "This reads a lot like AI-generated writing. Our check can be wrong, so if you wrote this yourself, you can ask a person to review it.",
+      "model_score": 0.9137,
+      "status": "decided",
+      "style_score": 0.6417,
+      "timestamp": "2026-11-04T22:59:28+00:00"
+    },
+    {
+      "content_id": "8ff1b210-e4aa-46af-967c-f28a1074549a",
+      "creator_id": "dinesh",
+      "event": "appeal",
+      "reasoning": "I wrote this paragraph myself for a class assignment.",
+      "status": "under_review",
+      "timestamp": "2026-11-04T22:59:28+00:00"
+    }
+  ]
+}
 ```
 
 ---
@@ -159,15 +239,22 @@ $ curl "http://127.0.0.1:5000/log?limit=3"
 
 **Moment 1**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- *What I asked for:* Help understanding Milestone 2 and setting a
+  false-positive target.
+- *What came back:* An explanation of each criterion area and the trade-off
+  between wrongly accusing writers and missing AI text.
+- *What I changed:* My first instinct was to allow 3–4 wrong accusations in 10.
+  After picturing being one of those writers, I lowered it to at most 1 in 10.
 
 **Moment 2**
 
-- *What I asked for:*
-- *What came back:*
-- *What I changed:*
+- *What I asked for:* To test signal one on texts I knew the answer to,
+  including a poem I had AI write about studying abroad and a one-sided love.
+- *What came back:* The AI poem scored 0.15 (strongly "human"), and a plain
+  human meeting note scored 0.82 ("AI").
+- *What I changed:* I stopped using only famous poems as my human test set, and
+  these two cases became the blind spots I name for signal one and the split
+  case my combining rule handles.
 
 <!-- ═══════════════════════ UNIT 8 — THE TEST ═══════════════════════ -->
 
