@@ -262,7 +262,7 @@ $ curl "http://127.0.0.1:5000/log?limit=2"
 
 ## Rate Limiting
 
-**My limits:** ___ per minute, ___ per day
+**My limits:** 5 per minute, 50 per day
 
 **Why those numbers and not others:**
 <!-- Think about two people: a real writer submitting their own work a few
@@ -270,13 +270,40 @@ $ curl "http://127.0.0.1:5000/log?limit=2"
      thresholds. Your numbers have to be liveable for the first and hostile to
      the second. -->
 
+A real writer submits a piece, reads the label, maybe edits once or twice and
+resubmits — a few a minute at the very most, and nowhere near 50 in a day, so
+neither limit ever touches them. A script trying to find where my 0.35 and 0.65
+thresholds sit needs hundreds of small variations; 5 a minute and 50 a day
+gives it far too few probes per creator_id to map them. 10/minute (the default)
+would let the flood test's first 10 through, which is already more probing
+than any writer needs.
+
 **What a caller counts as:** <!-- per address, or per creator_id? They fail
 differently — one script can look like a thousand callers, and one household
 can look like one. -->
 
+The `creator_id` in the request, falling back to the caller's address when
+there isn't one. The weakness: a script can invent a new `creator_id` for every
+request and never hit the limit.
+
 **The run of status codes when I pushed past it:**
 
 <!-- python run_attacks.py --flood 15 -->
+
+```
+$ python run_attacks.py --flood 15
+============================================================
+200 200 200 200 200 429 429 429 429 429 429 429 429 429 429
+============================================================
+
+10 of 15 were rate limited.
+```
+
+The rejection as it lands in `logs/audit.jsonl`:
+
+```json
+{"timestamp": "2026-11-16T00:27:44+00:00", "creator_id": "flood_tester", "event": "rejected", "status": "rejected", "reason": "rate_limited", "limit": "5 per 1 minute"}
+```
 
 ```
 
