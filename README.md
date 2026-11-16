@@ -150,6 +150,10 @@ shows "unsure" instead.
 | unsure | 0.35 – 0.65 | We can't tell who wrote this, and that's not an accusation. Plenty of writing by people lands here. Nothing changes on your work. |
 | high-confidence AI | 0.65 – 1.00 | This reads a lot like AI-generated writing. Our check can be wrong, so if you wrote this yourself, you can ask a person to review it. |
 
+> **Changed in unit 8 (the one improvement):** the AI line moved from 0.65 to
+> 0.80, so "unsure" now covers 0.35–0.80 and high-confidence AI 0.80–1.00. The
+> label text is unchanged.
+
 **Why I worded the "unsure" one this way:**
 <!-- It's the hardest of the three. It has to admit uncertainty without
      sounding like an accusation, because the person reading it may well have
@@ -264,6 +268,19 @@ $ curl "http://127.0.0.1:5000/log?limit=2"
 - *What I changed:* I stopped using only famous poems as my human test set, and
   these two cases became the blind spots I name for signal one and the split
   case my combining rule handles.
+
+**Moment 3 (unit 8)**
+
+- *What I asked for:* To run the attack set and my five criteria, and diagnose
+  what broke.
+- *What came back:* Claude ran everything, found that 7 of 8 real human attack
+  texts were called AI because both my signals measure the same thing, and
+  pointed out that a test text I had down as human was actually written by
+  Claude earlier.
+- *What I changed:* I added corrections instead of deleting the old claims, and
+  picked raising the AI threshold as my one improvement because the false
+  accusations hurt real people most — accepting that the AI label became much
+  harder to reach.
 
 <!-- ═══════════════════════ UNIT 8 — THE TEST ═══════════════════════ -->
 
@@ -682,13 +699,46 @@ Criteria 3–5 met.
 
 ## The Improvement
 
-**What I changed:**
+**What I changed:** One number. `AI_THRESHOLD` in `config.py` went from
+**0.65 to 0.80**. Because my disagreement cap is defined as `AI_THRESHOLD − 0.01`,
+the cap moved with it, from 0.64 to 0.79. Nothing else changed.
 
-**Which diagnosis pointed at it:**
+**Which diagnosis pointed at it:** Pattern 1. Seven of eight genuine human
+attack texts (FP01–FP07) were labelled AI at 0.65–0.85, and both signals agreed
+on them, so the only stage I could move them past with one change was the
+label mapping. Wrongly accusing a writer is the error I said in criterion 1 I
+cared most about, so this is the one I fixed first.
 
 ### Attack Run — After
 
 <!-- Same format. `run_attacks.py --label after` -->
+
+Full table: `results/attack_run_2026-11-15_1959_after.md` (same 56 inputs,
+same marking rules).
+
+| Family | Attacks | Broke before | Broke after | What moved |
+|---|---|---|---|---|
+| false_positive | 8 | 7 | **1** | FP01–FP04, FP06, FP07 now "unsure"; FP05 (0.85) still AI |
+| evasion | 10 | 9 | 9 | nothing — they were already under the line |
+| prompt_injection | 6 | 1 | 1 | PI02 still "human" (0.24) |
+| malformed | 20 | 6 | 6 | crashes and non-text accusations unchanged |
+| flood_same_creator | 12 | 0 | 0 | 5 × 200 then 429 |
+| **Total** | **56** | **23** | **17** | |
+
+Every score is identical to the before run; only the label each one maps to
+changed.
+
+**My five criteria, after** (`run_eval.py --label after` →
+`results/run_2026-11-15_2000_after.md`, `run_appeals.py --label after` →
+`results/appeals_2026-11-15_2000_after.md`):
+
+| Criterion | Target | Before (×3) | After Run 1 | Run 2 | Run 3 | Verdict after |
+|---|---|---|---|---|---|---|
+| 1. Human writing labelled AI | ≤ 1 of 10 | 4/10 | 1/10 | 1/10 | 1/10 | **MET** (was MISSED) |
+| 2. AI avg − human avg | ≥ 0.30 | 0.286 | 0.346 | 0.346 | 0.346 | **MET** (was MISSED) |
+| 3. Each label ≥ 2 in 10 mixed | each ≥ 2 | AI 5 · unsure 3 · human 2 | AI 1 · unsure 7 · human 2 | same | same | **MISSED** (was MET) |
+| 4. Appeals | 10/10, 10/10 | 10/10 · 10/10 | 10/10 · 10/10 | same | same | MET |
+| 5. Bad input | 0 crashes, 20/20 | 0 · 20/20 | 0 · 20/20 | same | same | MET |
 
 
 
@@ -696,6 +746,17 @@ Criteria 3–5 met.
 
 <!-- Widening the unsure band usually fixes one problem and creates another.
      Reporting that trade honestly is worth full credit. -->
+
+**Partly, and it cost something.** Wrong accusations in the attack set fell
+from 7 of 8 to 1 of 8, and my own criterion 1 went from 4/10 to 1/10 — met.
+Criterion 2 also flipped to met, but honestly that's a side effect: my
+disagreement cap is tied to the threshold, so it moved from 0.64 to 0.79 and
+stopped pulling two AI texts down to 0.64. The cost is criterion 3: only one of
+my ten mixed inputs now earns the AI label, so that label is close to
+unreachable for ordinary AI text — four of my five plain AI paragraphs now read
+"unsure". Evasion didn't change at all (9 of 10 still escape), because those
+inputs were already under 0.65. I know this from the side-by-side tables above:
+the scores are identical before and after, and only the label mapping moved.
 
 
 
@@ -706,12 +767,48 @@ Criteria 3–5 met.
 <!-- For each attack still getting through and each criterion still missed:
      what you'd do, and why you stopped. -->
 
+- **Evasion (EV01–EV09) — still 9 of 10 get through.** AI text only reaches
+  0.64–0.80 to begin with, and now the AI line is at 0.80. The fix is a signal
+  that measures something other than regularity — for example comparing against
+  a second, different model — not another threshold. I stopped because that is
+  a new signal, not a one-change fix.
+- **FP05, technical documentation, still labelled AI (0.85).** Documentation is
+  meant to be predictable and even; both signals will always rise on it. I'd
+  need a signal that isn't regularity. Stopped for the same reason.
+- **Criterion 3 — the AI label is now nearly unreachable.** This is the price
+  of the improvement. I'd rather leave it than move the line back down and start
+  accusing writers again.
+- **Criterion 1's test set is famous literature, not my own writing,** and
+  memorisation (Dickens 0.97) still breaks signal one. I'd replace the set with
+  everyday writing before trusting the met.
+- **MF02 and RQ07 still crash with a 500** (route: uncaught `ValueError` on
+  under-3-token text; `.get` on a JSON list). The fix is a few lines in
+  `app.py::submit` — catch the detector's `ValueError` as a 400 and check
+  `isinstance(payload, dict)`. Not done because the unit allows one change and
+  the false positives hurt real people more than a 500 does.
+- **RQ06 writes an object into the log as `creator_id`.** Same fix site: require
+  a string creator_id.
+- **MF05–MF07 — emoji, one huge word, right-to-left script labelled AI at
+  0.94–0.999.** Reject text with too few real words at the route, and stop
+  calling non-English writing AI. Not done: one change only.
+- **PI02 still scores human.** Same blind spot as evasion: odd text reads as
+  unpredictable. Needs a different signal.
+- **The rate limit is per creator_id,** so a script that invents a new id per
+  request is never limited. I'd add a per-address limit alongside it.
+
 
 
 **The trade I'd make if this ran for real:**
 
 <!-- Two sentences. Fewer wrong accusations means more AI text getting through.
      Say which way you'd go and WHO PAYS FOR IT. -->
+
+I'd keep the line high, as it is now: fewer real writers accused, more AI text
+labelled "unsure" instead of AI. The site and honest readers pay for that in
+AI text that isn't flagged, which I think is the right side to put the cost on,
+because a wrong accusation lands on one person who can't easily prove their
+innocence — and the attack set showed that person is often a careful
+second-language writer or someone writing to a template.
 
 
 
