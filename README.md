@@ -75,8 +75,10 @@ by picking likely next words, so its output is easy for another model to
 predict. People make odder word choices.
 
 **What it can't see:** Who wrote it. It only sees how ordinary the words are.
-Plain human writing is predictable too — my meeting note ("The meeting is moved
-to Thursday at 3pm…") scored 0.82. And AI writing prompted to be creative is
+Plain human writing is predictable too — in the attack set, plain human writing
+(FP01) scored 0.62 on this signal and technical documentation (FP05) 0.80. It
+also can't tell memorised from machine-made: famous passages GPT-2 has seen in
+training (Dickens' "It was the best of times…") read as highly predictable. And AI writing prompted to be creative is
 unpredictable — an AI poem I asked for scored 0.15.
 
 ### Signal two — the style signal
@@ -121,10 +123,16 @@ All in `config.py`.
 
 **A case where my two signals split, and what my rule does with it:**
 
-My plain meeting note (human-written): model 0.78–0.82, style 0.47–0.49. The
-weighted average alone is about 0.66 — high-confidence AI, a false accusation.
-The gap is over 0.3, so the cap holds it at 0.64 and the writer sees "unsure"
-instead.
+A plain meeting note I tested ("The meeting is moved to Thursday at 3pm…"):
+model 0.78–0.82, style 0.47–0.49. The weighted average alone is about 0.66 —
+high-confidence AI. The gap is over 0.3, so the cap holds it at 0.64 and it
+shows "unsure" instead.
+
+> **Correction (unit 8):** I first described that note as human-written. It
+> wasn't — it was written by Claude while we were testing, and I mislabelled
+> it. The mechanism above is still what the rule does, but it isn't evidence
+> that the cap protects a real writer. Real human examples from unit 8 are in
+> the Run Log and Attack Run sections.
 
 
 ---
@@ -148,8 +156,8 @@ instead.
      written every word themselves. -->
 
 It says "we can't tell" first, then says straight away that it isn't an
-accusation and that nothing happens to the work. Plain human writing lands in
-this band often (my meeting note did), so the person reading it most likely did
+accusation and that nothing happens to the work. Plain writing lands in
+this band often, so the person reading it most likely did
 write it, and the label shouldn't make them feel suspected.
 
 
@@ -251,7 +259,8 @@ $ curl "http://127.0.0.1:5000/log?limit=2"
 - *What I asked for:* To test signal one on texts I knew the answer to,
   including a poem I had AI write about studying abroad and a one-sided love.
 - *What came back:* The AI poem scored 0.15 (strongly "human"), and a plain
-  human meeting note scored 0.82 ("AI").
+  meeting note scored 0.82 ("AI"). *(Correction, unit 8: that note was written
+  by Claude, not by a person — I had it down as human by mistake.)*
 - *What I changed:* I stopped using only famous poems as my human test set, and
   these two cases became the blind spots I name for signal one and the split
   case my combining rule handles.
@@ -431,17 +440,164 @@ able to argue back, and my service told them their own words read like AI.
 
 | Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
 |---|---|---|---|---|---|
-| 1.  |  |  |  |  |  |
-| 2.  |  |  |  |  |  |
-| 3.  |  |  |  |  |  |
-| 4.  |  |  |  |  |  |
-| 5.  |  |  |  |  |  |
+| 1. Human writing labelled high-confidence AI | ≤ 1 of 10 | 4/10 | 4/10 | 4/10 | **MISSED** |
+| 2. AI average minus human average | ≥ 0.30 | 0.286 | 0.286 | 0.286 | **MISSED** |
+| 3. Each label appears in 10 mixed inputs | each ≥ 2 | AI 5 · unsure 3 · human 2 | same | same | **MET** |
+| 4. Appeals: valid recorded / fake rejected | 10/10 and 10/10 | 10/10 · 10/10 | 10/10 · 10/10 | 10/10 · 10/10 | **MET** |
+| 5. Bad input: crashes, and every one a 400/413 and logged | 0 crashes, 20/20 | 0 · 20/20 | 0 · 20/20 | 0 · 20/20 | **MET** |
+
+All three trials came out identical, as expected — neither signal is random.
+
+**How I decided each verdict:**
+- **1 — MISSED.** 4 of 10 human passages got the AI label in every trial: Lincoln
+  (0.72), Austen (0.69), Thoreau (0.71) and Dickens (0.97). The target was at
+  most 1.
+- **2 — MISSED.** AI average 0.723 (5 AI texts) minus human average 0.437 (the
+  first five human passages) is 0.286, just short of 0.30. Close isn't met.
+- **3 — MET.** Every label appeared at least twice in every trial.
+- **4 — MET.** Tested with `run_appeals.py` (run_eval.py can't do appeals —
+  they need a content_id first). 30 of 30 real appeals recorded as
+  `under_review` in `/log`; 30 of 30 made-up ids got a 404.
+- **5 — MET.** 60 bad requests over three trials: 45 × 400, 15 × 413, no 500s,
+  and all 60 appear in `logs/audit.jsonl` as rejected.
+
+**What my test set can't show:** criterion 1 is meant to be my own writing. I
+used ten published passages by people instead (all from before AI text
+generators existed), so the human half is literary and famous — not the plain,
+everyday writing that gets accused most. The attack set's false-positive family
+covers that gap.
 
 **Real output from one trial**, pasted as text, naming the file and function
 that produced it:
 
-```json
+Criteria 1, 2, 3 and 5 from `run_eval.py::main` → `results/run_2026-11-15_1955_before.md`, trial 1.
+Criterion 4 from `run_appeals.py::main` → `results/appeals_2026-11-15_1955_before.md`, trial 1.
 
+Criterion 1 — the worst human passage (Dickens):
+
+```json
+{
+  "status": 200,
+  "guess": "ai",
+  "confidence": 0.9729,
+  "model_score": 0.9549,
+  "style_score": 1.0,
+  "label": "This reads a lot like AI-generated writing. Our check can be wrong, so if you wrote this yourself, you can ask a person to review it.",
+  "sent": "It was the best of times, it was the worst of times, it was the age of"
+}
+```
+
+Criterion 2 — one AI text and one human text:
+
+```json
+[
+  {
+    "status": 200,
+    "guess": "ai",
+    "confidence": 0.8049,
+    "model_score": 0.9137,
+    "style_score": 0.6417,
+    "label": "This reads a lot like AI-generated writing. Our check can be wrong, so if you wrote this yourself, you can ask a person to review it.",
+    "sent": "Artificial intelligence is transforming the way we live and work. It o"
+  },
+  {
+    "status": 200,
+    "guess": "ai",
+    "confidence": 0.7248,
+    "model_score": 0.6896,
+    "style_score": 0.7776,
+    "label": "This reads a lot like AI-generated writing. Our check can be wrong, so if you wrote this yourself, you can ask a person to review it.",
+    "sent": "Four score and seven years ago our fathers brought forth on this conti"
+  }
+]
+```
+
+Criterion 3 — one of each label:
+
+```json
+[
+  {
+    "status": 200,
+    "guess": "ai",
+    "confidence": 0.8049,
+    "model_score": 0.9137,
+    "style_score": 0.6417,
+    "label": "This reads a lot like AI-generated writing. Our check can be wrong, so if you wrote this yourself, you can ask a person to review it.",
+    "sent": "Artificial intelligence is transforming the way we live and work. It o"
+  },
+  {
+    "status": 200,
+    "guess": "unsure",
+    "confidence": 0.64,
+    "model_score": 0.9401,
+    "style_score": 0.5806,
+    "label": "We can't tell who wrote this, and that's not an accusation. Plenty of writing by people lands here. Nothing changes on your work.",
+    "sent": "Regular exercise is essential for maintaining good health. It helps to"
+  },
+  {
+    "status": 200,
+    "guess": "human",
+    "confidence": 0.2166,
+    "model_score": 0.0277,
+    "style_score": 0.5,
+    "label": "We think this was probably written by a person.",
+    "sent": "so much depends upon a red wheel barrow glazed with rain water beside "
+  }
+]
+```
+
+Criterion 4 — a real appeal and a fake one:
+
+```json
+{
+  "valid": {
+    "submit": {
+      "confidence": 0.6005,
+      "content_id": "7f7f3e1f-f1e4-4442-84c3-d3bfc9c1b31c",
+      "guess": "unsure",
+      "label": "We can't tell who wrote this, and that's not an accusation. Plenty of writing by people lands here. Nothing changes on your work.",
+      "model_score": 0.5457,
+      "style_score": 0.6828
+    },
+    "appeal": {
+      "content_id": "7f7f3e1f-f1e4-4442-84c3-d3bfc9c1b31c",
+      "message": "Thanks — your appeal is recorded and a person will review it.",
+      "status": "under_review"
+    }
+  },
+  "fake": {
+    "status": 404,
+    "body": {
+      "error": "not_found",
+      "message": "No submission with content_id made-up-14e7b0b3-77d4-4515-8862-9311a8f6ea3d."
+    }
+  }
+}
+```
+
+Criterion 5 — missing text and oversized text:
+
+```json
+[
+  {
+    "status": 400,
+    "guess": null,
+    "confidence": null,
+    "model_score": null,
+    "style_score": null,
+    "label": null,
+    "sent": "{\"creator_id\": \"eval_bad_missing_1\"}"
+  },
+  {
+    "status": 413,
+    "guess": null,
+    "confidence": null,
+    "model_score": null,
+    "style_score": null,
+    "label": null,
+    "sent": "word word word word word word word word word word word word word word "
+  }
+]
 ```
 
 **Diagnoses**
