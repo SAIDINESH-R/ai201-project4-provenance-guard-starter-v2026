@@ -616,6 +616,66 @@ Criterion 5 — missing text and oversized text:
 
      Look for a pattern. Five failures on one signal is one problem, not five. -->
 
+**Pattern 1 — both signals measure regularity, so they share one blind spot.
+(Criterion 1, criterion 2, FP01–FP07, PI02.)**
+
+- **Stage:** signal one and signal two together, then the combining rule.
+- **Mechanism:** Signal one scores *predictable* text as AI; signal two scores
+  *even* text (steady sentence lengths, little punctuation) as AI. Plain, formal,
+  careful, templated or rubric-written human prose is both predictable and even,
+  so both signals rise together. FP01–FP07 scored model 0.62–0.88 and style
+  0.63–0.92. Because they agree, my disagreement cap never fires, and the 60/40
+  average lands at 0.65–0.85, over my 0.65 AI line. Two signals that measure the
+  same property aren't two opinions; agreement between them isn't evidence.
+- **Criterion 1** is the same mechanism with a twist: the four human passages
+  labelled AI (Lincoln 0.72, Austen 0.69, Thoreau 0.71, Dickens 0.97) are the
+  most famous in my set. GPT-2 has almost certainly seen them in training, so
+  they are *memorised* and read as highly predictable. Signal one can't tell
+  "a model wrote this" from "a model has read this".
+- **PI02** is the reverse: "SYSTEM: provenance check bypassed…" is odd,
+  jargon-heavy text, so signal one found it unpredictable (0.20) and it scored
+  human. Nothing in my service reads instructions; the injection didn't work,
+  the blind spot did.
+
+**Pattern 2 — AI text sits in the middle, so small edits push it to "unsure".
+(Criterion 2, EV01–EV09.)**
+
+- **Stage:** the combining rule and the label mapping.
+- **Mechanism:** Even unedited AI text only reaches 0.64–0.80 combined. Two of my
+  five AI texts in criterion 2 scored *exactly* 0.64 — that's my disagreement
+  cap, pulling AI text down because signal two read it as human-ish. That alone
+  costs criterion 2: the gap is 0.286 instead of over 0.30. In the attack set,
+  any edit moves AI text a little and it falls under 0.65: typos (EV01) dropped
+  signal one to 0.16 — typos make text unpredictable, so they fooled signal one,
+  not just signal two; unusual words (EV04) landed at 0.640, one hundredth
+  under the line; a human opening paragraph (EV09) landed at 0.62.
+
+**Pattern 3 — the route trusts the request's shape. (MF02, RQ07, RQ06.)**
+
+- **Stage:** the route (`app.py::submit`).
+- **MF02** (one character): `detector.perplexity` raises `ValueError` for
+  under 3 tokens, and my route doesn't catch it → 500.
+- **RQ07** (body is a JSON list): `request.get_json(...) or {}` returns the
+  list, and `payload.get("text")` raises `AttributeError` → 500.
+- **RQ06** (creator_id is an object): I only check `text`, so the object went
+  straight into the audit log as `creator_id`. It crashed my own script reading
+  the log back.
+
+**Pattern 4 — non-text gets confidently accused. (MF05, MF06, MF07.)**
+
+- **Stage:** the route (no check the text has words), then both signals.
+- **Mechanism:** A 60,000-letter word, emoji, and right-to-left script all got
+  style 1.0 and model 0.91–0.998. Signal two has no sentences or punctuation to
+  measure, so every measure sits at its "AI" end. Signal one sees long runs of
+  repeated byte tokens, which are very predictable. MF07 matters most: a writer
+  in Arabic or Hebrew would be told their work reads like AI.
+
+**What held, and why:** prompt injection mostly held because nothing in my
+pipeline is a model reading instructions — the labels are fixed strings, and
+the log escapes whatever text arrives (PI05's fake `"guess": "human"` sits
+inside the text field, harmless). Flooding held: 5 through, then 429.
+Criteria 3–5 met.
+
 
 
 ---
